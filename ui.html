@@ -576,7 +576,10 @@ function applySnapshot(m){
 
 if (STATIC){
   document.querySelector('.ctl')?.style.setProperty('opacity', '.45');
-  fetch('/state').then(r => r.json()).then(applySnapshot);
+  // ?tick=N 直接渲染第 N 刻（走世界快照），用来逐帧出图；不带就渲染当前状态
+  const t = new URLSearchParams(location.search).get('tick');
+  const url = t ? '/replay?tick=' + encodeURIComponent(t) : '/state';
+  fetch(url).then(r => r.json()).then(w => { if (!w.error) applySnapshot(w); });
 } else {
 const es = new EventSource('/events');
 es.onmessage = e => {

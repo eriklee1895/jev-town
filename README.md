@@ -2,7 +2,9 @@
 
 > 一个不停在做决定的小镇。每个居民每刻的每个判断，都是一次 [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) 调用。
 
-![Jev小镇](docs/screenshot.jpg)
+![Jev小镇](docs/demo.gif)
+
+*十六刻的延时：第 8 刻广场上出现一个没有来历的包裹，然后全镇朝它聚拢——左边是地图，右边是每个人这次判断的完整概率分布。*
 
 Jev 是 TypeSafe AI 的 System One 模型——它不生成文字，只把非结构化的状态变成**带概率的类型化决策**。
 
@@ -71,6 +73,8 @@ uv run town.py
 ---
 
 ## 面板上能做什么
+
+![面板](docs/screenshot.jpg)
 
 - **悬停任何一个居民**，直接看到他那次判断的完整概率分布
 - 头像外圈的颜色是他的戒备程度（蓝 放松 / 灰 寻常 / 橙 警觉 / 红 高度戒备）

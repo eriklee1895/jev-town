@@ -129,6 +129,8 @@ class Town:
     def world_snapshot(self):
         return {
             "tick": self.tick,
+            "decisions": self.total_decisions,
+            "cost": round(self.total_cost, 6),
             "residents": [{"name": r["name"], "slug": r["slug"], "role": r["role"], "loc": r["loc"],
                            "blindfold": r["blindfold"], "last": r["last"],
                            "answers": r.get("last_answers") or {}} for r in self.residents],
@@ -155,8 +157,12 @@ class Town:
             if not self.worlds:
                 return None
             i = max(0, min(int(tick) - 1, len(self.worlds) - 1))
-            w = dict(self.worlds[i], total=len(self.worlds))
+            w = dict(self.worlds[i], total=len(self.worlds), worlds=len(self.worlds))
             w["events"] = [e for e in self.events if e["tick"] <= w["tick"]][-8:]
+            w["recent"] = list(reversed(
+                [r for r in self.log if r.get("tick", 0) <= w["tick"]][-12:]))
+            w["observations"] = list(reversed(
+                [o for o in self.observations if o["tick"] <= w["tick"]][-6:]))
             return w
 
     def diverge(self, first_tick):
@@ -468,6 +474,7 @@ class Town:
                     for k, a in res["answers"].items()}
                 self.total_cost += res.get("cost") or 0.0
                 self.total_decisions += len(res.get("answers", {}))
+                res["tick"] = tick
                 self.log.append(res)
             self.worlds.append(self.world_snapshot())      # 供回放与分叉
         self.broadcast({"type": "tick", "tick": tick, "results": results,
