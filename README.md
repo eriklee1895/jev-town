@@ -2,7 +2,7 @@
 
 > 一个不停在做决定的小镇。每个居民每刻的每个判断，都是一次 [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) 调用。
 
-![Jev小镇](docs/demo.gif)
+![Jev小镇](docs/demo.webp)
 
 *十八刻的延时：第 8 刻广场上出现一个没有来历的包裹，然后全镇朝它聚拢。头像外圈的颜色是各自的戒备程度，右上角带问号的是领先幅度不到 25% 的决定。*
 
