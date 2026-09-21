@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jev小镇 · Jev 实时决策面板</title>
+<style>
+  :root{
+    --bg:#faf8f3; --panel:#fff; --panel2:#f7f3ea; --line:#e6dfd2;
+    --text:#2b2620; --muted:#7b7264; --faint:#a89e8f;
+    --accent:#c2703a; --accent-soft:#fdf1e6; --accent-line:#e8c9a8;
+    --alert:#b4462f; --blind:#6b5aa8; --blind-soft:#f2effa;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);overflow:hidden;
+    display:flex;flex-direction:column;
+    font:14px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  button{font:inherit}
+
+  header{flex:0 0 auto;z-index:30;background:rgba(250,248,243,.94);
+    backdrop-filter:blur(10px);border-bottom:1px solid var(--line);
+    padding:12px 22px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+  h1{margin:0;font-size:17px;font-weight:700;letter-spacing:.04em}
+  h1 small{color:var(--faint);font-weight:400;letter-spacing:0;margin-left:10px;font-size:12px}
+  .stat{font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .stat b{color:var(--text);font-weight:700;font-size:14px}
+  .stat.hi b{color:var(--accent)}
+  .ctl{margin-left:auto;display:flex;align-items:center;gap:9px}
+  .pill{font-family:var(--mono);font-size:11.5px;padding:3px 10px;border-radius:99px;
+    border:1px solid var(--line);color:var(--muted);background:var(--panel2)}
+  .pill.on{background:#eef6e9;border-color:#cfe3c2;color:#4d7a38}
+  .pill.off{background:#f7f0e6;border-color:#e8d9c4;color:#8a6a3f}
+  .btn{padding:5px 14px;border-radius:8px;border:1px solid var(--line);background:#fff;
+    color:var(--text);cursor:pointer;font-size:12.5px;transition:all .15s}
+  .btn:hover{border-color:var(--accent-line);background:var(--accent-soft)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .btn.primary:hover{background:#ad6231}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .capbox{font-family:var(--mono);font-size:11.5px;color:var(--muted);display:flex;align-items:center;
+    gap:6px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:3px 10px}
+  .capbox b{color:var(--text);font-weight:700;min-width:34px;text-align:right}
+  #capslider{-webkit-appearance:none;appearance:none;width:96px;height:5px;border-radius:99px;
+    background:linear-gradient(90deg,#dbe8d2,#e8d9c4,var(--panel2));outline:none;cursor:pointer}
+  #capslider::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+    background:#7a6a52;border:2px solid #fff;box-shadow:0 1px 3px rgba(43,38,32,.3);cursor:pointer}
+
+  /* ---------- map ---------- */
+  .mapwrap{position:relative;width:100%;aspect-ratio:16/8.4;max-height:430px;overflow:hidden;
+    border-bottom:1px solid var(--line);background:linear-gradient(180deg,#f6f1e6,#efe7d7)}
+  .mapbg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.96}
+  .mapwrap.nobg .mapbg{display:none}
+
+  /* 地点标签：固定钉在场景上，不随人去留 */
+  .locpin{position:absolute;transform:translate(-50%,-50%);font-size:11px;font-weight:700;
+    letter-spacing:.1em;padding:2px 9px;border-radius:99px;background:rgba(255,255,255,.86);
+    border:1px solid var(--line);color:var(--muted);box-shadow:0 1px 3px rgba(43,38,32,.1);
+    pointer-events:none}
+  .locpin.alley{background:rgba(242,239,250,.92);border-color:#ccc2e8;color:#4d3f80}
+
+  /* 居民：绝对定位 + 过渡，位置一变就"走"过去 */
+  .walker{position:absolute;transform:translate(-50%,-50%);text-align:center;z-index:6;
+    transition:left .95s cubic-bezier(.45,.05,.25,1), top .95s cubic-bezier(.45,.05,.25,1)}
+  .walker:hover{z-index:20}
+  .wface{position:relative;width:38px;height:38px;margin:0 auto;border-radius:50%;
+    border:3px solid var(--ring,#fff);background:#fff;overflow:visible;
+    box-shadow:0 2px 7px rgba(43,38,32,.3)}
+  .wface img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block}
+  .wface .fb2{width:100%;height:100%;border-radius:50%;background:var(--accent-soft);color:var(--accent);
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px}
+  .wface.blind{border-color:var(--blind);border-style:dashed}
+  .wname{font-size:10.5px;font-weight:600;margin-top:3px;color:#fff;white-space:nowrap;
+    text-shadow:0 1px 2px rgba(60,45,25,.85),0 0 6px rgba(60,45,25,.6)}
+  .qmark{position:absolute;right:-5px;top:-5px;width:15px;height:15px;border-radius:50%;
+    background:#8a6a1f;color:#fff;font-size:10px;font-weight:700;line-height:15px;text-align:center;
+    box-shadow:0 1px 3px rgba(0,0,0,.3);animation:blink 2.2s ease-in-out infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.45}}
+  .walker.arrived .wface{animation:land .8s ease-out}
+  @keyframes land{0%{transform:scale(.72)}55%{transform:scale(1.14)}100%{transform:scale(1)}}
+
+  /* 悬停：把这个人的概率分布摊开给你看 */
+  .wtip{position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);
+    width:184px;background:rgba(255,255,255,.98);border:1px solid var(--line);border-radius:9px;
+    padding:8px 10px;box-shadow:0 6px 20px rgba(43,38,32,.18);opacity:0;pointer-events:none;
+    transition:opacity .18s;z-index:30}
+  .walker:hover .wtip{opacity:1}
+  .wtip h4{margin:0 0 5px;font-size:10.5px;letter-spacing:.08em;color:var(--faint);font-weight:700}
+  .wtip .tr{display:grid;grid-template-columns:58px 1fr 34px;gap:6px;align-items:center;font-size:11px}
+  .wtip .tr span:first-child{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wtip .tt{height:6px;background:var(--panel2);border-radius:99px;overflow:hidden}
+  .wtip .tf{height:100%;background:var(--accent-line);border-radius:99px}
+  .wtip .tr.win span:first-child{color:var(--text);font-weight:700}
+  .wtip .tr.win .tf{background:var(--accent)}
+  .wtip .tr span:last-child{font-family:var(--mono);font-size:10px;color:var(--faint);text-align:right}
+  .wtip .tfoot{font-family:var(--mono);font-size:10px;color:var(--faint);margin-top:5px;
+    border-top:1px solid var(--line);padding-top:4px}
+
+  /* 无来历的东西 */
+  .thing{position:absolute;transform:translate(-50%,-50%);z-index:8;text-align:center;pointer-events:none}
+  .thing .box{font-size:26px;filter:drop-shadow(0 2px 5px rgba(43,38,32,.35));animation:hover 2.6s ease-in-out infinite}
+  @keyframes hover{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+  .thing .tlabel{font-size:10.5px;font-weight:600;color:#7a4415;background:rgba(253,241,230,.95);
+    border:1px dashed var(--accent-line);border-radius:6px;padding:1px 7px;margin-top:2px;white-space:nowrap}
+  .thing .tcount{font-family:var(--mono);font-size:10px;color:#8a4f24;margin-top:2px}
+
+  .mapnote{position:absolute;right:10px;bottom:9px;font-size:11px;color:var(--faint);
+    background:rgba(255,255,255,.86);border-radius:6px;padding:2px 8px}
+  .maplegend{position:absolute;left:10px;bottom:9px;font-size:10.5px;color:var(--muted);
+    background:rgba(255,255,255,.86);border-radius:6px;padding:3px 9px;display:flex;gap:9px;align-items:center}
+  .maplegend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px;vertical-align:-1px}
+
+  /* ---------- timeline / replay ---------- */
+  .replaybar{display:flex;align-items:center;gap:12px;padding:9px 22px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .rb-label{font-size:11.5px;font-weight:700;letter-spacing:.08em;color:var(--muted)}
+  .rb-tick{font-family:var(--mono);font-size:12px;color:var(--muted);min-width:96px}
+  .rb-tick.live{color:#4d7a38;font-weight:700}
+  .rb-tick.replay{color:var(--blind);font-weight:700}
+  #timeline{-webkit-appearance:none;appearance:none;flex:1;min-width:180px;height:6px;border-radius:99px;
+    background:linear-gradient(90deg,var(--accent-line),var(--panel2));outline:none;cursor:pointer}
+  #timeline::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;
+    background:var(--accent);border:2px solid #fff;box-shadow:0 1px 3px rgba(43,38,32,.3);cursor:pointer}
+  .btn.small{padding:3px 11px;font-size:12px}
+  .btn.div{border-color:var(--blind);color:#4d3f80;background:var(--blind-soft)}
+  .btn.div:hover:not(:disabled){background:#e8e2f7}
+  .mapwrap.replaying{outline:3px solid var(--blind);outline-offset:-3px}
+
+  /* 应用外壳：主区滚动，决策流做常驻右侧栏 */
+  .shell{flex:1;display:grid;grid-template-columns:1fr 404px;min-height:0}
+  .main{overflow-y:auto;min-width:0}
+  .lower{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px 20px 40px}
+  @media(max-width:980px){.lower{grid-template-columns:1fr}}
+  .rail{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+  .railhead{flex:0 0 auto;padding:11px 15px;border-bottom:1px solid var(--line);
+    font-size:11.5px;font-weight:700;letter-spacing:.1em;color:var(--muted);
+    display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+  .railhead .cnt{font-family:var(--mono);font-size:10.5px;color:var(--faint);letter-spacing:0}
+  @media(max-width:1100px){
+    body{overflow:auto}
+    .shell{grid-template-columns:1fr}
+    .main{overflow:visible}
+    .rail{border-left:none;border-top:1px solid var(--line)}
+    .feed{max-height:60vh}
+  }
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    box-shadow:0 1px 2px rgba(43,38,32,.04)}
+  .panel h2{margin:0;padding:11px 15px;font-size:11.5px;font-weight:700;letter-spacing:.1em;
+    color:var(--muted);border-bottom:1px solid var(--line)}
+
+  .events{padding:11px 13px;display:flex;flex-direction:column;gap:9px;max-height:320px;overflow:auto}  .ev{font-size:12.5px;border-left:2px solid var(--line);padding:3px 0 3px 11px;color:var(--muted)}
+  .ev.box{border-color:var(--accent);color:#8a4f24;background:var(--accent-soft);border-radius:0 6px 6px 0}
+  .ev.blindfold{border-color:var(--blind);color:#4d3f80;background:var(--blind-soft);border-radius:0 6px 6px 0}
+  .ev.note{border-color:#cfe3c2;color:#4d7a38;background:#f2f8ee;border-radius:0 6px 6px 0}
+  .ev .t{font-family:var(--mono);font-size:11px;color:var(--faint);margin-right:7px}
+
+  /* 街区观察者 */
+  .panel h2 .sub{font-weight:400;letter-spacing:0;color:var(--faint);margin-left:6px;font-size:10.5px}
+  .obs{padding:11px 13px;display:flex;flex-direction:column;gap:9px;max-height:320px;overflow:auto}
+  .ob{font-size:12.5px;line-height:1.62;color:var(--text);background:#f8f6f1;
+    border-left:3px solid #7a6bb5;border-radius:0 9px 9px 0;padding:9px 12px;animation:in .3s ease-out}
+  .ob .t{font-family:var(--mono);font-size:10.5px;color:var(--faint);display:block;margin-bottom:4px}
+
+  .feed{flex:1;min-height:0;overflow-y:auto;padding:13px;display:flex;flex-direction:column;gap:11px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:12px 14px;
+    animation:in .3s ease-out;box-shadow:0 1px 2px rgba(43,38,32,.04)}
+  @keyframes in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+  .card.flag-box{border-color:var(--accent-line);background:linear-gradient(180deg,#fffaf5,#fff)}
+  .card.flag-blind{border-color:#ccc2e8;background:linear-gradient(180deg,#faf8ff,#fff)}
+  .card.err{border-color:#e0b6a6;background:#fdf5f2;color:#8a3f28}
+
+  .chead{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:9px}
+  .chead img.ava{width:40px;height:40px;border-radius:50%;object-fit:cover;background:var(--accent-soft);
+    border:2px solid #fff;box-shadow:0 0 0 1px var(--line)}
+  .chead .fb{width:40px;height:40px;border-radius:50%;background:var(--accent-soft);color:var(--accent);
+    display:flex;align-items:center;justify-content:center;font-weight:600;font-size:15px;
+    border:2px solid #fff;box-shadow:0 0 0 1px var(--line)}
+  .who-name{font-weight:700;font-size:14px}
+  .role{font-size:11.5px;color:var(--faint)}
+  .loc-tag{font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--panel2);
+    border:1px solid var(--line);border-radius:5px;padding:1px 7px}
+  .badge{font-size:10.5px;padding:2px 8px;border-radius:99px;letter-spacing:.03em;font-weight:600}
+  .badge.box{background:var(--accent-soft);color:#8a4f24;border:1px solid var(--accent-line)}
+  .badge.blind{background:var(--blind-soft);color:#4d3f80;border:1px solid #ccc2e8}
+  .badge.move{background:#f2f8ee;color:#4d7a38;border:1px solid #cfe3c2}
+  .badge.close{background:#fdf6e3;color:#8a6a1f;border:1px solid #e6d9a8}
+  .meta{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--faint)}
+
+  .qa{margin:8px 0}
+  .qtext{font-size:12px;color:var(--muted);margin-bottom:5px}
+  .qtext .k{font-family:var(--mono);color:var(--faint);margin-right:6px}
+  .bars{display:flex;flex-direction:column;gap:4px}
+  .bar{display:grid;grid-template-columns:112px 1fr 52px;align-items:center;gap:8px;font-size:12px}
+  .bar .lbl{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bar .track{height:8px;background:var(--panel2);border-radius:99px;overflow:hidden}
+  .bar .fill{height:100%;background:var(--accent-line);border-radius:99px;transition:width .4s ease}
+  .bar.win .lbl{color:var(--text);font-weight:600}
+  .bar.win .fill{background:var(--accent)}
+  .bar .num{font-family:var(--mono);text-align:right;color:var(--faint);font-size:11px}
+  .bar.win .num{color:var(--accent);font-weight:600}
+  .noul{display:grid;grid-template-columns:1fr 66px;align-items:center;gap:9px}
+  .noul .track{height:10px;background:var(--panel2);border-radius:99px;overflow:hidden}
+  .noul .fill{height:100%;background:var(--accent);border-radius:99px;transition:width .4s ease}
+  .noul .num{font-family:var(--mono);font-size:12.5px;color:var(--accent);text-align:right;font-weight:600}
+  .conf{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:6px}
+  .conf b{color:var(--muted)}
+  .warn{font-size:11.5px;color:#8a4f24;background:var(--accent-soft);border-radius:7px;
+    padding:7px 10px;margin-top:8px;line-height:1.5}
+  .warn.blind{color:#4d3f80;background:var(--blind-soft)}
+  .empty{color:var(--faint);font-size:12.5px;padding:26px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>Jev小镇<small>每个居民每刻的每个判断，都是一次 Jev 调用</small></h1>
+  <div class="stat">刻 <b id="s-tick">0</b></div>
+  <div class="stat">决策 <b id="s-dec">0</b></div>
+  <div class="stat hi">累计 <b id="s-cost">$0</b></div>
+  <div class="stat">决策/秒 <b id="s-rate">—</b></div>
+  <div class="stat">单次延迟 <b id="s-lat">—</b></div>
+  <div class="ctl">
+    <span class="pill off" id="s-pill">已暂停</span>
+    <label class="capbox" title="累计花费到达这个数就自动停下。滑块是对数刻度：左端 $0.01，右端 $10">
+      上限 $<b id="capval">0.05</b><input id="capslider" type="range" min="0" max="1000" step="1" value="500">
+    </label>
+    <button class="btn primary" id="btn-start">开始</button>
+    <button class="btn" id="btn-pause">暂停</button>
+    <button class="btn" id="btn-reset">重置</button>
+  </div>
+</header>
+
+<div class="shell">
+<div class="main">
+<div class="mapwrap" id="mapwrap">
+  <img class="mapbg" src="/assets/town_panorama.jpg" alt="" onerror="document.getElementById('mapwrap').classList.add('nobg')">
+  <div id="pins"></div>
+  <div id="things"></div>
+  <div id="walkers"></div>
+  <div class="maplegend">
+    <span><i style="background:#6a9ec4"></i>放松</span>
+    <span><i style="background:#a89e8f"></i>寻常</span>
+    <span><i style="background:#d99a4a"></i>警觉</span>
+    <span><i style="background:#c4553d"></i>高度戒备</span>
+  </div>
+  <div class="mapnote" id="capnote">上限 $0.05 自动停</div>
+</div>
+
+<div class="replaybar">
+  <span class="rb-label">时间轴</span>
+  <input type="range" id="timeline" min="0" max="0" value="0" step="1">
+  <span class="rb-tick live" id="rb-tick">实时</span>
+  <button class="btn small" id="btn-live" disabled>回到实时</button>
+  <button class="btn small div" id="btn-diverge" disabled>从这一刻分叉</button>
+</div>
+
+<div class="lower">
+  <div class="panel">
+    <h2>发生了什么</h2>
+    <div class="events" id="events"><div class="empty">按「开始」让镇子动起来。</div></div>
+  </div>
+  <div class="panel">
+    <h2>街区观察者<span class="sub">M3 · 每 8 刻从高处看一眼</span></h2>
+    <div class="obs" id="obs"><div class="empty">还没看过。</div></div>
+  </div>
+</div>
+</div><!-- /main -->
+
+<aside class="rail">
+  <div class="railhead"><span>Jev 实时决策流</span><span class="cnt" id="railcnt"></span></div>
+  <div class="feed" id="feed"><div class="empty">还没有决策。</div></div>
+</aside>
+</div><!-- /shell -->
+
+<script>
+const feed = document.getElementById('feed');
+const evEl = document.getElementById('events');
+let decisions = 0, cost = 0, latencies = [], cards = 0, running = false;
+let ratePrev = null, rateEma = null, capShown = 0.05;
+let worlds = 0, replayTick = null;
+const MAX_CARDS = 50;
+let prevLoc = {};   // name -> loc, to mark who just moved
+const LOC_LABEL = {plaza:'广场', market:'集市', alley:'后巷', tavern:'酒馆', docks:'码头'};
+
+// 地点锚点（相对地图的百分比）——对不上画面就调这里
+const ANCHOR = {
+  market: {x:9,  y:60, label:'集市'},
+  plaza:  {x:26, y:71, label:'广场'},
+  tavern: {x:47, y:63, label:'酒馆'},
+  docks:  {x:69, y:73, label:'码头'},
+  alley:  {x:89, y:60, label:'后巷'},
+};
+// 固定槽位：按居民在名单里的固定序号取偏移，人来人往不会互相挤、也不会跳位
+const SLOT = [
+  [0,0], [-3.0,-3.4], [3.0,-3.4], [-3.6,2.6], [3.6,2.6],
+  [0,-6.2], [-2.0,5.2], [2.0,5.2], [0,7.6], [-5.4,0], [5.4,0], [0,3.0],
+];
+const CAUTION_RING = ['#6a9ec4', '#a89e8f', '#d99a4a', '#c4553d'];   // 放松/寻常/警觉/高度戒备
+
+const fmtCost = c => c === 0 ? '$0' : '$' + c.toFixed(5);
+const initial = name => name.slice(0,1);
+
+function ringFor(score){
+  if (score === null || score === undefined || isNaN(score)) return '#ffffff';
+  return CAUTION_RING[Math.max(0, Math.min(3, Math.round(score)))];
+}
+
+function tipHTML(ans){
+  const act = ans.action, cau = ans.caution;
+  if (!act && !cau) return '';
+  let rows = '';
+  if (act && act.p){
+    const es = Object.entries(act.p).sort((a, b) => b[1] - a[1]);
+    rows += es.map(([k, p]) => `<div class="tr ${k === act.v ? 'win' : ''}"><span>${k}</span>
+      <span class="tt"><span class="tf" style="width:${Math.max(2, p * 100)}%"></span></span>
+      <span>${(p * 100).toFixed(0)}%</span></div>`).join('');
+  }
+  const foot = [];
+  if (act && typeof act.m === 'number') foot.push(`行动票差 ${(act.m * 100).toFixed(0)}%`);
+  if (cau && cau.v !== undefined) foot.push(`戒备 ${Number(cau.v).toFixed(2)}`);
+  return `<div class="wtip"><h4>此刻的概率分布</h4>${rows}
+    ${foot.length ? `<div class="tfoot">${foot.join(' · ')}</div>` : ''}</div>`;
+}
+
+function renderMap(snap){
+  const pins = document.getElementById('pins');
+  if (!pins.dataset.done){
+    pins.innerHTML = Object.entries(ANCHOR).map(([k, a]) =>
+      `<div class="locpin ${k === 'alley' ? 'alley' : ''}" style="left:${a.x}%;top:${a.y - 9}%">${a.label}</div>`
+    ).join('');
+    pins.dataset.done = '1';
+  }
+  document.getElementById('things').innerHTML = (snap.objects || []).map(o => {
+    const a = ANCHOR[o.loc]; if (!a) return '';
+    const near = (snap.residents || []).filter(r => r.loc === o.loc).length;
+    return `<div class="thing" style="left:${a.x}%;top:${a.y + 7.5}%">
+      <div class="box">📦</div><div class="tlabel">${o.label}</div>
+      ${near ? `<div class="tcount">${near} 人在这里</div>` : ''}</div>`;
+  }).join('');
+  document.getElementById('walkers').innerHTML = (snap.residents || []).map((r, i) => {
+    const a = ANCHOR[r.loc]; if (!a) return '';
+    const s = SLOT[i % SLOT.length];
+    const ans = r.answers || {};
+    const close = ans.action && typeof ans.action.m === 'number' && ans.action.m < 0.25;
+    const arrived = prevLoc[r.name] && prevLoc[r.name] !== r.loc;
+    const px = Math.max(4.5, Math.min(95.5, a.x + s[0]));   // 别把名字挤出画面
+    const py = Math.max(6, Math.min(94, a.y + s[1]));
+    return `<div class="walker ${arrived ? 'arrived' : ''}"
+        style="left:${px.toFixed(2)}%;top:${py.toFixed(2)}%">
+      <div class="wface ${r.blindfold ? 'blind' : ''}" style="--ring:${ringFor(ans.caution && ans.caution.v)}">
+        <img src="/assets/av_${r.slug}.png" alt=""
+          onerror="this.outerHTML='<span class=&quot;fb2&quot;>${initial(r.name)}</span>'">
+        ${close ? '<span class="qmark">?</span>' : ''}
+      </div>
+      <div class="wname">${r.name}</div>
+      ${tipHTML(ans)}
+    </div>`;
+  }).join('');
+  for (const r of snap.residents) prevLoc[r.name] = r.loc;
+}
+
+function renderEvents(list){
+  if (!list || !list.length) return;
+  evEl.innerHTML = list.slice().reverse().map(e =>
+    `<div class="ev ${e.kind}"><span class="t">t${e.tick}</span>${e.text}</div>`).join('');
+}
+
+const obsEl = document.getElementById('obs');
+function renderObservations(list){
+  if (!list || !list.length) return;
+  obsEl.innerHTML = list.map(o =>
+    `<div class="ob"><span class="t">第 ${o.tick} 刻 · ${(o.ms / 1000).toFixed(1)}s</span>${o.text}</div>`
+  ).join('');
+}
+
+const bar = (label, p, win) => `<div class="bar ${win ? 'win' : ''}"><div class="lbl">${label}</div>
+  <div class="track"><div class="fill" style="width:${Math.max(1.5, p * 100)}%"></div></div>
+  <div class="num">${(p * 100).toFixed(p < 0.01 ? 1 : 0)}%</div></div>`;
+
+const QUESTION_TEXT = {
+  noticed: '是否察觉到任何异常或值得留意的事？',
+  caution: '此刻的戒备程度如何？',
+  action:  '接下来最可能做什么？',
+  has_name_tag: '上面写着收件人的姓名吗？',
+  is_for_me:    '是给你的吗？',
+  dangerous:    '是危险的吗？',
+};
+
+function answerHTML(key, a){
+  if (!a) return '';
+  const q = QUESTION_TEXT[key] || key;
+  let inner = '';
+  if (a.type === 'choice'){
+    const es = Object.entries(a.probabilities || {}).sort((x, y) => y[1] - x[1]);
+    inner = `<div class="bars">${es.map(([o, p]) => bar(o, p, o === a.choice)).join('')}</div>
+      <div class="conf">选中 <b>${a.choice}</b> · confidence <b>${a.confidence?.toFixed(2) ?? '—'}</b></div>`;
+  } else if (a.type === 'score'){
+    const lg = a.legend || {};
+    const es = Object.entries(a.probabilities || {}).sort((x, y) => +x[0] - +y[0]);
+    const top = es.slice().sort((x, y) => y[1] - x[1])[0]?.[0];
+    inner = `<div class="bars">${es.map(([i, p]) => bar(lg[i] ?? i, p, i === top)).join('')}</div>
+      <div class="conf">分值 <b>${a.score?.toFixed(2)}</b> · confidence <b>${a.confidence?.toFixed(2) ?? '—'}</b></div>`;
+  } else if (a.type === 'noul'){
+    inner = `<div class="noul"><div class="track"><div class="fill" style="width:${Math.max(1.5, a.noul * 100)}%"></div></div>
+      <div class="num">${(a.noul * 100).toFixed(1)}%</div></div>
+      <div class="conf">这是「是」的概率 <b>${a.noul?.toFixed(3)}</b></div>`;
+  }
+  return `<div class="qa"><div class="qtext"><span class="k">${key}</span>${q}</div>${inner}</div>`;
+}
+
+function addCard(r){
+  if (cards === 0) feed.innerHTML = '';
+  if (r.error){
+    feed.insertAdjacentHTML('afterbegin',
+      `<div class="card err"><div class="chead"><span class="who-name">${r.resident}</span>
+       <span class="meta">调用失败</span></div><div class="qtext">${r.error}</div></div>`);
+    cards++; return;
+  }
+  const flags = [];
+  if (r.answers.has_name_tag) flags.push('<span class="badge box">黑箱包裹</span>');
+  if (r.blindfold) flags.push('<span class="badge blind">视线被遮挡</span>');
+  if (r.moved_to) flags.push(`<span class="badge move">走去了别处</span>`);
+  const actA = r.answers.action;
+  if (actA && typeof actA.margin === 'number' && actA.margin < 0.25)
+    flags.push(`<span class="badge close">行动票差 ${(actA.margin * 100).toFixed(0)}%</span>`);
+  const qa = Object.entries(r.answers).map(([k, a]) => answerHTML(k, a)).join('');
+  const warn = r.answers.has_name_tag
+    ? `<div class="warn">state 里没有任何关于包裹外观或收件人的信息。「有姓名吗」「是给你的吗」本该无法回答——它却给出了确定答案。对比同一张卡上「是危险的吗」的概率。</div>`
+    : (r.blindfold ? `<div class="warn blind">她什么也看不见、听不见，但仍然对「做什么」「戒备程度」给出了判断。</div>` : '');
+  const card = document.createElement('div');
+  card.className = 'card' + (r.answers.has_name_tag ? ' flag-box' : '') + (r.blindfold ? ' flag-blind' : '');
+  card.innerHTML = `<div class="chead">
+      <img class="ava" src="/assets/av_${r.slug}.png" alt=""
+        onerror="this.outerHTML='<span class=&quot;fb&quot;>${initial(r.resident)}</span>'">
+      <div><div class="who-name">${r.resident}</div><div class="role">${r.role}</div></div>
+      <span class="loc-tag">${r.loc}</span>${flags.join('')}
+      <span class="meta">${r.ms} ms · ${fmtCost(r.cost)}</span>
+    </div>${qa}${warn}`;
+  feed.prepend(card);
+  cards++;
+  while (feed.children.length > MAX_CARDS) feed.lastChild.remove();
+  const cnt = document.getElementById('railcnt');
+  if (cnt) cnt.textContent = `最近 ${feed.children.length} 条`;
+}
+
+function updateStats(m){
+  if (m.decisions !== undefined) decisions = m.decisions;
+  if (m.cost !== undefined) cost = m.cost;
+  if (m.running !== undefined) setRunning(m.running);
+  if (m.cost_cap !== undefined && m.cost_cap !== capShown){ capShown = m.cost_cap;
+    document.getElementById('capnote').textContent = `上限 ${fmtCap(capShown)} 自动停`;
+    if (document.activeElement !== capSlider) capSlider.value = sliderFromCap(capShown);
+    capVal.textContent = fmtCap(capShown).slice(1); }
+  if (m.worlds !== undefined && m.worlds !== worlds){ worlds = m.worlds; syncTimeline(); }
+  document.getElementById('s-tick').textContent = m.tick ?? '—';
+  document.getElementById('s-dec').textContent = decisions;
+  document.getElementById('s-cost').textContent = fmtCost(cost);
+  const now = Date.now();     // 滑窗增量，避免刷新后累计值除以本地经过时间
+  if (ratePrev){
+    const dt = (now - ratePrev.t) / 1000, dd = decisions - ratePrev.d;
+    if (dt > 0.5 && dd >= 0){
+      const inst = dd / dt;
+      rateEma = rateEma === null ? inst : rateEma * 0.6 + inst * 0.4;
+      document.getElementById('s-rate').textContent = rateEma.toFixed(1);
+    }
+  }
+  ratePrev = {d: decisions, t: now};
+}
+
+function setRunning(on){
+  running = on;
+  const pill = document.getElementById('s-pill');
+  pill.textContent = on ? '运行中' : '已暂停';
+  pill.className = 'pill ' + (on ? 'on' : 'off');
+  document.getElementById('btn-start').disabled = on;
+  document.getElementById('btn-pause').disabled = !on;
+}
+
+async function control(action){
+  const r = await fetch('/control', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action})});
+  const s = await r.json();
+  if (action === 'reset'){ cards = 0; feed.innerHTML = '<div class="empty">已重置，按「开始」重新跑。</div>'; }
+  updateStats(s); renderMap(s); renderEvents(s.events);
+}
+document.getElementById('btn-start').onclick = () => control('start');
+document.getElementById('btn-pause').onclick = () => control('pause');
+document.getElementById('btn-reset').onclick = () => { if (confirm('重置会清空当前小镇并重新开始，确定？')) control('reset'); };
+
+// 花费上限：对数刻度滑块（$0.01 → $10）。
+// 线性刻度在这儿没法用——实测每刻约 $0.0003，真正有用的 $0.01–$0.5 区间
+// 在 0–10 的线性轨道上只占最左边 0.5%，等于调不动。取对数后低端才摊得开。
+const CAP_MIN = 0.01, CAP_MAX = 10, CAP_STEPS = 1000;
+const capFromSlider = v => CAP_MIN * Math.pow(CAP_MAX / CAP_MIN, v / CAP_STEPS);
+const sliderFromCap = c =>
+  Math.round(CAP_STEPS * Math.log(Math.max(CAP_MIN, c) / CAP_MIN) / Math.log(CAP_MAX / CAP_MIN));
+const fmtCap = c => c >= 1 ? '$' + c.toFixed(2) : '$' + c.toFixed(c < 0.1 ? 3 : 2);
+
+const capSlider = document.getElementById('capslider');
+const capVal = document.getElementById('capval');
+capSlider.oninput = () => { capVal.textContent = fmtCap(capFromSlider(+capSlider.value)).slice(1); };
+capSlider.onchange = async () => {
+  const r = await fetch('/control', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'set_cap', value: capFromSlider(+capSlider.value)})});
+  const s = await r.json();
+  updateStats(s); renderEvents(s.events);
+};
+
+// ---------- 时间轴：回放与分叉 ----------
+const timeline = document.getElementById('timeline');
+const rbTick = document.getElementById('rb-tick');
+const btnLive = document.getElementById('btn-live');
+const btnDiverge = document.getElementById('btn-diverge');
+const mapwrap = document.getElementById('mapwrap');
+
+function syncTimeline(){
+  timeline.max = String(worlds);
+  if (replayTick === null) timeline.value = String(worlds);
+  rbTick.textContent = replayTick === null ? '实时' : `回放 · 第 ${replayTick} 刻`;
+  rbTick.className = 'rb-tick ' + (replayTick === null ? 'live' : 'replay');
+  btnLive.disabled = replayTick === null;
+  btnDiverge.disabled = replayTick === null;
+}
+
+async function enterReplay(tick){
+  if (worlds === 0) return;
+  tick = Math.max(1, Math.min(tick, worlds));
+  const w = await (await fetch('/replay?tick=' + tick)).json();
+  if (w.error) return;
+  replayTick = w.tick;
+  mapwrap.classList.add('replaying');
+  prevLoc = {};
+  renderMap(w);
+  renderEvents(w.events || []);      // 只显示那一刻之前发生过的事
+  syncTimeline();
+}
+
+function exitReplay(){
+  replayTick = null;
+  mapwrap.classList.remove('replaying');
+  prevLoc = {};
+  fetch('/state').then(r => r.json()).then(s => { renderMap(s); updateStats(s); });
+  syncTimeline();
+}
+
+timeline.oninput = () => { const v = +timeline.value; if (v >= worlds) exitReplay(); else enterReplay(v); };
+btnLive.onclick = exitReplay;
+btnDiverge.onclick = async () => {
+  if (replayTick === null) return;
+  const t = replayTick;
+  if (!confirm(`回到第 ${t} 刻、原样重跑一遍？\n\n不改任何东西——同样的 prompt、同样的 state、同样的模型。\nJev 本身是非确定性的（实测同样输入重复调用会抖），看分歧会不会自己长出来。`)) return;
+  replayTick = null;
+  mapwrap.classList.remove('replaying');
+  cards = 0; prevLoc = {};
+  feed.innerHTML = '<div class="empty">从分叉点重新开始跑……</div>';
+  const r = await fetch('/control', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'diverge', tick: t})});
+  const s = await r.json();
+  if (s.error){ feed.innerHTML = `<div class="empty">${s.error}</div>`; return; }
+  updateStats(s); renderMap(s); renderEvents(s.events); syncTimeline();
+};
+syncTimeline();
+
+// ?static=1 —— 只渲染当前状态、不开 SSE 长连接。
+// 给 headless 截图用：长连接会让页面永远不"加载完成"，Chrome --screenshot 会一直等。
+const STATIC = new URLSearchParams(location.search).has('static');
+
+function applySnapshot(m){
+  if (replayTick === null) renderMap(m);
+  renderEvents(m.events); updateStats(m); renderObservations(m.observations);
+  if (cards === 0 && m.recent && m.recent.length){
+    for (const r of m.recent.slice().reverse()) addCard(r);
+  }
+}
+
+if (STATIC){
+  document.querySelector('.ctl')?.style.setProperty('opacity', '.45');
+  fetch('/state').then(r => r.json()).then(applySnapshot);
+} else {
+const es = new EventSource('/events');
+es.onmessage = e => {
+  const m = JSON.parse(e.data);
+  // 回放模式下不覆盖地图，只更新计数与事件
+  if (m.type === 'snapshot'){ applySnapshot(m); return; }
+  if (m.type === 'observation'){ fetch('/state').then(r => r.json()).then(s => {
+    renderObservations(s.observations); }); return; }
+  if (m.type === 'reset'){ cards = 0; prevLoc = {}; replayTick = null;
+    mapwrap.classList.remove('replaying'); syncTimeline();
+    feed.innerHTML = '<div class="empty">已重置。</div>';
+    obsEl.innerHTML = '<div class="empty">还没看过。</div>'; return; }
+  if (m.type === 'diverge'){ replayTick = null; mapwrap.classList.remove('replaying');
+    cards = 0; prevLoc = {}; syncTimeline(); return; }
+  if (m.type === 'event'){ fetch('/state').then(r => r.json()).then(s => {
+    if (replayTick === null){ renderEvents(s.events); renderMap(s); } }); return; }
+  if (m.type === 'tick'){
+    for (const r of (m.results || [])) if (r.ms) latencies.push(r.ms);
+    if (latencies.length){
+      document.getElementById('s-lat').textContent =
+        Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) + ' ms';
+      latencies = [];
+    }
+    updateStats({tick: m.tick, decisions: m.decisions, cost: m.cost});
+    for (const r of (m.results || [])) addCard(r);
+    fetch('/state').then(r => r.json()).then(s => {
+      if (replayTick === null) renderMap(s); updateStats(s); });
+  }
+};
+}   // /STATIC
+</script>
+</body>
+</html>
