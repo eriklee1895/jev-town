@@ -4,7 +4,7 @@
 
 ![Jev小镇](docs/demo.gif)
 
-*十六刻的延时：第 8 刻广场上出现一个没有来历的包裹，然后全镇朝它聚拢——左边是地图，右边是每个人这次判断的完整概率分布。*
+*十八刻的延时：第 8 刻广场上出现一个没有来历的包裹，然后全镇朝它聚拢。头像外圈的颜色是各自的戒备程度，右上角带问号的是领先幅度不到 25% 的决定。*
 
 Jev 是 TypeSafe AI 的 System One 模型——它不生成文字，只把非结构化的状态变成**带概率的类型化决策**。
 
@@ -40,7 +40,7 @@ state 里没有任何关于包裹外观或收件人的信息，它却对前两�
 
 | | 居民层 | 街区层 |
 |---|---|---|
-| 模型 | **Jev** | **MiniMax-M3** |
+| 模型 | **Jev** | 任何 Responses API 模型（默认 MiniMax-M3） |
 | 单次耗时 | ~650 ms | 6.8–14.2 s |
 | 看到什么 | 只有自己眼前那一小块 | 全镇 |
 | 产出 | 一个概率 + 一个选择 | 一段有判断的简报 |
@@ -56,13 +56,21 @@ state 里没有任何关于包裹外观或收件人的信息，它却对前两�
 ## 快速开始
 
 ```bash
-# 需要 OPENROUTER_API_KEY（跑 Jev）；MINIMAX_API_KEY 可选（街区观察者，没有就自动关掉）
-echo 'OPENROUTER_API_KEY=sk-or-...' > .env
-echo 'MINIMAX_API_KEY=...' >> .env
-
-uv run town.py
-# 打开 http://127.0.0.1:8787
+cp .env.example .env     # 填上 OPENROUTER_API_KEY 就能跑
+uv run town.py           # 打开 http://127.0.0.1:8787
 ```
+
+只需要一个 key：`OPENROUTER_API_KEY`（Jev 走 OpenRouter 的 decisions 端点）。
+
+**街区观察者那一层是可选的**——`OPENAI_API_KEY` 留空就自动跳过，小镇照样跑完整。想换个模型当观察者，改这三个：
+
+```bash
+OPENAI_BASE_URL=https://api.minimaxi.com/v1   # 默认 MiniMax
+OPENAI_API_KEY=...
+OBSERVER_MODEL=MiniMax-M3
+```
+
+任何兼容 **OpenAI Responses API** 的 provider 都行（注意是 `/responses`，不是 `/chat/completions`——OpenAI、DeepSeek、MiniMax 都原生支持）。不同实现有细节差异，代码里对 `reasoning` 参数和 `output_text` 字段都做了兜底，碰到不认的会自动降级重试。
 
 **默认是暂停的**——打开页面不会产生任何 API 调用，按「开始」才动。
 
@@ -121,16 +129,6 @@ uv run town.py
 - 世界快照每刻存一份，回放和分叉都建立在它上面
 
 零依赖：`town.py` 只用标准库，`ui.html` 是原生 JS。没有构建步骤。
-
----
-
-## 素材
-
-12 张居民头像和小镇全景由 **Seedream 5.0 Pro** 生成（中国风淡彩木刻感，暖白底以便铺在浅色界面上）。
-
-![角色](docs/characters.jpg)
-
-镇子的五个地方钉在一张全景图上；居民是会走动的个体，位置一变就从一处走到另一处。
 
 ---
 

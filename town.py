@@ -26,6 +26,7 @@ import os
 import queue
 import threading
 import time
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -34,8 +35,9 @@ from pathlib import Path
 HERE = Path(__file__).parent
 JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
 JEV_MODEL = "~typesafe/jev-latest"
-M3_ENDPOINT = "https://api.minimaxi.com/v1/responses"
-M3_MODEL = "MiniMax-M3"
+# 街区观察者：任何兼容 OpenAI Responses API 的 provider 都可以
+DEFAULT_OBSERVER_BASE = "https://api.minimaxi.com/v1"
+DEFAULT_OBSERVER_MODEL = "MiniMax-M3"
 OBSERVE_EVERY = 8          # 每多少刻让街区观察者看一眼
 PORT = 8787
 TICK_SECONDS = 2.6
@@ -50,7 +52,8 @@ def env_file():
     return None
 
 
-def get_key(name: str) -> str:
+def get_var(name: str, default: str = "") -> str:
+    """先看环境变量，再看 env 文件；都没有就返回默认值。"""
     v = (os.environ.get(name) or "").strip().strip('"').strip("'")
     if v:
         return v
@@ -59,8 +62,15 @@ def get_key(name: str) -> str:
         for line in f.read_text().splitlines():
             if line.startswith(name + "="):
                 return line.split("=", 1)[1].strip().strip('"').strip("'")
-    raise SystemExit(
-        f"缺少 {name}：设成环境变量，或写进 {HERE}/.env（格式 {name}=...）")
+    return default
+
+
+def get_key(name: str) -> str:
+    v = get_var(name)
+    if not v:
+        raise SystemExit(
+            f"缺少 {name}：设成环境变量，或写进 {HERE}/.env（格式 {name}=...）")
+    return v
 
 
 # ----------------------------------------------------------------- world
@@ -101,6 +111,25 @@ ACTION_CRITERIA = {
 }
 
 
+def extract_text(data: dict) -> str:
+    """从 Responses API 的返回里取正文。
+
+    官方 SDK 会补一个 output_text 便利字段，但不是每个 provider 都给，
+    所以拿不到就自己从 output[] 里把 message 的文字捞出来。
+    """
+    t = (data.get("output_text") or "").strip()
+    if t:
+        return t
+    parts = []
+    for item in data.get("output") or []:
+        if item.get("type") != "message":
+            continue
+        for c in item.get("content") or []:
+            if c.get("type") in ("output_text", "text") and c.get("text"):
+                parts.append(c["text"])
+    return "\n".join(parts).strip()
+
+
 class Town:
     def __init__(self):
         self.lock = threading.Lock()
@@ -114,10 +143,10 @@ class Town:
         self.total_decisions = 0
         self.subscribers: list[queue.Queue] = []
         self.key = get_key("OPENROUTER_API_KEY")
-        try:
-            self.m3key = get_key("MINIMAX_API_KEY")
-        except SystemExit:
-            self.m3key = ""
+        # 街区观察者是可选的：没配 OPENAI_API_KEY 就自动跳过这一层
+        self.obs_key = get_var("OPENAI_API_KEY")
+        self.obs_base = (get_var("OPENAI_BASE_URL") or DEFAULT_OBSERVER_BASE).rstrip("/")
+        self.obs_model = get_var("OBSERVER_MODEL") or DEFAULT_OBSERVER_MODEL
         self.observations = []     # 街区观察者历次简报
         self._observing = False
         self.pool = ThreadPoolExecutor(max_workers=12)
@@ -244,6 +273,7 @@ class Town:
                 "running": self.running,
                 "cost_cap": self.cost_cap,
                 "worlds": len(self.worlds),
+                "observer_model": self.obs_model if self.obs_key else "",
                 "recent": list(reversed(self.log[-12:])),
                 "observations": list(reversed(self.observations[-6:])),
                 "locations": {k: v["label"] for k, v in LOCATIONS.items()},
@@ -371,7 +401,7 @@ class Town:
         return "\n".join(lines)
 
     def observe(self):
-        """M3 从高处看一眼镇子，写一段简报。
+        """让街区观察者从高处看一眼镇子，写一段简报。
 
         它拿到的是结构化摘要，不是画面；和居民层的 Jev 正好互为对照——
         一个只看得见自己眼前那一小块、快而便宜，一个看得见全局、慢而啰嗦。
@@ -382,25 +412,41 @@ class Town:
         prompt = ("你是这个小镇的街区观察者。下面是你此刻掌握的镇子情况：\n\n" + digest +
                   "\n\n请用中文写 2-3 句写给镇长看的简报：镇子上正在发生什么、有没有值得注意的地方、"
                   "如果觉得哪里不对劲你建议先看哪里。只写简报正文，不要标题、不要客套话、不要复述清单。")
-        body = {"model": M3_MODEL, "input": prompt, "max_output_tokens": 3000,
-                "reasoning": {"effort": "minimal"}}
-        req = urllib.request.Request(
-            M3_ENDPOINT, data=json.dumps(body).encode(),
-            headers={"Authorization": f"Bearer {self.m3key}", "Content-Type": "application/json"},
-            method="POST")
-        t0 = time.perf_counter()
-        try:
-            with urllib.request.urlopen(req, timeout=150) as resp:
-                data = json.loads(resp.read())
-            text = (data.get("output_text") or "").strip()
-        except Exception as exc:
-            text = f"（这次没看成：{str(exc)[:120]}）"
-        ms = round((time.perf_counter() - t0) * 1000)
+        text, ms = self._ask_observer(prompt)
         with self.lock:
             self.observations.append({"tick": tick, "text": text, "ms": ms})
             del self.observations[:-12]
         self.broadcast({"type": "observation", "tick": tick, "text": text, "ms": ms})
         return text
+
+    def _ask_observer(self, prompt):
+        """调观察者。各家的 Responses 实现有差异——reasoning 参数不是每家都认——
+        所以碰到 400 就去掉它重试一次，取文本也留了兜底。"""
+        url = self.obs_base + "/responses"
+
+        def call(body):
+            req = urllib.request.Request(
+                url, data=json.dumps(body).encode(),
+                headers={"Authorization": f"Bearer {self.obs_key}",
+                         "Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=150) as resp:
+                return json.loads(resp.read())
+
+        body = {"model": self.obs_model, "input": prompt, "max_output_tokens": 3000,
+                "reasoning": {"effort": "minimal"}}
+        t0 = time.perf_counter()
+        try:
+            try:
+                data = call(body)
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    raise
+                body.pop("reasoning", None)
+                data = call(body)
+            text = extract_text(data) or "（这次的简报是空的）"
+        except Exception as exc:
+            text = f"（这次没看成：{str(exc)[:140]}）"
+        return text, round((time.perf_counter() - t0) * 1000)
 
     def move_for(self, resident, act):
         """把选中的行动变成真的位移——人要在镇上走动，地图才有意义。"""
@@ -497,7 +543,7 @@ class Town:
             except Exception as exc:
                 self.add_event("error", f"tick 出错：{exc}")
             # 街区观察者：每 OBSERVE_EVERY 刻看一眼，放在单独线程里不拖慢镇子
-            if self.m3key and self.tick and self.tick % OBSERVE_EVERY == 0 and not self._observing:
+            if self.obs_key and self.tick and self.tick % OBSERVE_EVERY == 0 and not self._observing:
                 self._observing = True
 
                 def _job():
